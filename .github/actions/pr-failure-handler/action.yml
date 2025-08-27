@@ -1,0 +1,45 @@
+name: "CI Failure Handler"
+description: "PR Comment & Close Action"
+
+inputs:
+  message:
+    required: true
+    description: "The message to post as a comment."
+  github_token:
+    required: true
+    description: "Github Actions Auth TOKEN"
+
+runs:
+  using: "composite"
+  steps:
+    - name: PR Comment on Failure
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        MSG=$(cat << EOF
+        ${{ inputs.message }}
+
+        ### 🔧 修正後の対応
+        1. 上記のエラーをすべて修正してください
+        2. 修正完了後、新しいPRを作成してください
+        3. または、このPRを再オープンして修正をpushしてください
+
+        ** 10秒後にPRを自動クローズします**
+        EOF
+        )
+        gh pr comment ${{ github.event.pull_request.number }} --body-file <(echo "${MSG}")
+
+    - name: Sleep on Failure
+      shell: bash
+      run: sleep 10
+
+    - name: PR Close on Failure
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        MSG="🚫 **PR自動クローズします。**"
+        gh pr comment ${{ github.event.pull_request.number }} --body-file <(echo "${MSG}")
+        gh pr close ${{ github.event.pull_request.number }}
+        exit 1
