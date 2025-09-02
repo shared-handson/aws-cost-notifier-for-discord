@@ -1,26 +1,23 @@
 # AWS Cost Notifier for Discord - メインTerraform設定ファイル
 
 terraform {
-  required_version = ">= 1.0"
+  backend "s3" {}
+  required_version = ">= 1.12.2"
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
     }
-    awscc = {
-      source  = "hashicorp/awscc"
-      version = "~> 0.70"
-    }
-    archive = {
-      source  = "hashicorp/archive"
-      version = "~> 2.4"
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
     }
   }
 }
 
 provider "aws" {
   region = var.aws_region
-  
+
   default_tags {
     tags = {
       Project     = "aws-cost-notifier-for-discord"
@@ -30,106 +27,18 @@ provider "aws" {
   }
 }
 
-provider "awscc" {
-  region = var.aws_region
-}
 
 # データソース
 data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
-# Lambda関数のソースコードをZIP化
-data "archive_file" "lambda_zip" {
-  type        = "zip"
-  source_file = "../lambda/lambda_function.py"
-  output_path = "lambda_function.zip"
-}
-
-# Lambdaデプロイメントパッケージ用S3バケット
-resource "aws_s3_bucket" "lambda_assets" {
-  bucket_prefix = "aws-cost-notifier-lambda-assets-"
-}
-
-resource "aws_s3_bucket_versioning" "lambda_assets" {
-  bucket = aws_s3_bucket.lambda_assets.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-# S3バケット暗号化用のKMSキー
-resource "aws_kms_key" "lambda_assets" {
-  description             = "AWS Cost Notifier Lambda assets S3バケット暗号化用KMSキー"
-  deletion_window_in_days = 7
-  
-  tags = {
-    Name = "aws-cost-notifier-lambda-assets-key"
-  }
-}
-
-# KMSキーのエイリアス
-resource "aws_kms_alias" "lambda_assets" {
-  name          = "alias/aws-cost-notifier-lambda-assets-${var.environment}"
-  target_key_id = aws_kms_key.lambda_assets.key_id
-}
-
-# S3バケットのサーバーサイド暗号化設定
-resource "aws_s3_bucket_server_side_encryption_configuration" "lambda_assets" {
-  bucket = aws_s3_bucket.lambda_assets.id
-
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm     = "aws:kms"
-      kms_master_key_id = aws_kms_key.lambda_assets.arn
-    }
-    bucket_key_enabled = true
-  }
-}
-
-# S3バケットのライフサイクル設定（コスト最適化）
-resource "aws_s3_bucket_lifecycle_configuration" "lambda_assets" {
-  bucket = aws_s3_bucket.lambda_assets.id
-
-  rule {
-    id     = "delete_old_versions"
-    status = "Enabled"
-    
-    filter {}
-
-    expiration {
-      days = 30
-    }
-
-    noncurrent_version_expiration {
-      noncurrent_days = 7
-    }
-  }
-}
-
-# S3バケットのパブリックアクセスブロック設定
-resource "aws_s3_bucket_public_access_block" "lambda_assets" {
-  bucket = aws_s3_bucket.lambda_assets.id
-
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
-}
-
-# LambdaデプロイメントパッケージをS3にアップロード
-resource "aws_s3_object" "lambda_zip" {
-  bucket = aws_s3_bucket.lambda_assets.id
-  key    = "lambda_function.zip"
-  source = data.archive_file.lambda_zip.output_path
-  etag   = data.archive_file.lambda_zip.output_md5
-}
 
 # Lambda関数用IAMロール
-resource "awscc_iam_role" "lambda_role" {
-  role_name = "aws-cost-notifier-lambda-role-${var.environment}"
+resource "aws_iam_role" "lambda_role" {
+  name        = "aws-cost-notifier-lambda-role-${var.environment}"
   description = "AWS Cost Notifier Lambda関数用IAMロール"
-  
-  assume_role_policy_document = jsonencode({
+
+  assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
@@ -141,94 +50,176 @@ resource "awscc_iam_role" "lambda_role" {
       }
     ]
   })
-  
-  managed_policy_arns = [
-    "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
-  ]
-  
-  policies = [
-    {
-      policy_name = "CostExplorerAccess"
-      policy_document = jsonencode({
-        Version = "2012-10-17"
-        Statement = [
-          {
-            Effect = "Allow"
-            Action = [
-              "ce:GetCostAndUsage",
-              "ce:GetUsageReport"
-            ]
-            Resource = "*"
-          }
-        ]
-      })
-    }
-  ]
-  
-  tags = [
-    {
-      key   = "Name"
-      value = "aws-cost-notifier-lambda-role"
-    }
-  ]
+
+  tags = {
+    Name = "aws-cost-notifier-lambda-role"
+  }
 }
 
-# Lambda関数
-resource "awscc_lambda_function" "cost_notifier" {
+# Lambda基本実行ロールのアタッチ
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# Cost Explorer アクセス用のインラインポリシー
+resource "aws_iam_role_policy" "cost_explorer_access" {
+  name = "CostExplorerAccess"
+  role = aws_iam_role.lambda_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ce:GetCostAndUsage",
+          "ce:GetUsageReport"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
+# Lambda関数（インラインコード版）
+resource "aws_lambda_function" "cost_notifier" {
   function_name = "aws-cost-notifier-${var.environment}"
   description   = "Discord用AWS料金通知Lambda関数"
-  
-  code = {
-    s3_bucket = aws_s3_bucket.lambda_assets.id
-    s3_key    = aws_s3_object.lambda_zip.key
-  }
-  
+
+  filename         = "lambda_function.zip"
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+
   package_type  = "Zip"
   handler       = "lambda_function.lambda_handler"
   runtime       = "python3.11"
-  timeout       = 60
-  memory_size   = 256
-  role          = awscc_iam_role.lambda_role.arn
+  timeout       = 30
+  memory_size   = 128
+  role          = aws_iam_role.lambda_role.arn
   architectures = ["arm64"]
-  
-  environment = {
+
+  environment {
     variables = {
-      DISCORD_WEBHOOK_URL = var.discord_webhook_url
+      LOG_LEVEL = var.log_level
     }
   }
-  
-  tags = [
-    {
-      key   = "Name"
-      value = "aws-cost-notifier"
-    }
-  ]
-}
 
-# スケジュール実行用EventBridgeルール
-resource "aws_cloudwatch_event_rule" "cost_notification_schedule" {
-  name                = "aws-cost-notification-schedule-${var.environment}"
-  description         = "AWS料金通知Lambda関数を毎日実行"
-  schedule_expression = var.schedule_expression
-  state               = "ENABLED"
-  
   tags = {
-    Name = "aws-cost-notification-schedule"
+    Name = "aws-cost-notifier"
   }
 }
 
-# Lambda関数用EventBridgeターゲット
-resource "aws_cloudwatch_event_target" "lambda_target" {
-  rule      = aws_cloudwatch_event_rule.cost_notification_schedule.name
-  target_id = "CostNotifierLambdaTarget"
-  arn       = awscc_lambda_function.cost_notifier.arn
+# Lambdaパッケージ用のローカル実行（依存関係インストール）
+resource "null_resource" "lambda_dependencies" {
+  triggers = {
+    requirements_hash = filemd5("../pyproject.toml")
+    lambda_code_hash  = filemd5("../lambda/lambda_function.py")
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      # ディレクトリとファイルの準備
+      [ -f ${path.module}/lambda_package.zip ] && rm -rf ${path.module}/lambda_package.zip
+      [ -d ${path.module}/lambda_package ] && rm -rf ${path.module}/lambda_package
+      mkdir ${path.module}/lambda_package
+      
+      # pyproject.tomlの依存関係をLambdaパッケージディレクトリにインストール
+      uv pip install \
+        --no-installer-metadata \
+        --no-compile-bytecode \
+        --python-platform aarch64-manylinux2014 \
+        --python 3.11 \
+        --target ${path.module}/lambda_package \
+        ${path.module}/..
+
+      # Lambda関数コードをコピー
+      cp ${path.module}/../lambda/lambda_function.py ${path.module}/lambda_package/
+
+      # ZIP化（依存関係含む）
+      zip -r ${path.module}/lambda_package.zip ${path.module}/lambda_package/
+    EOT
+  }
 }
 
-# EventBridgeからLambda関数を実行するための権限
-resource "aws_lambda_permission" "allow_eventbridge" {
-  statement_id  = "AllowExecutionFromEventBridge"
-  action        = "lambda:InvokeFunction"
-  function_name = awscc_lambda_function.cost_notifier.function_name
-  principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.cost_notification_schedule.arn
+# EventBridge Schedulerグループ
+resource "aws_scheduler_schedule_group" "cost_notification_group" {
+  name = "aws-cost-notification-group-${var.environment}"
+
+  tags = {
+    Name = "aws-cost-notification-group"
+  }
+}
+
+# スケジュール実行用EventBridge Scheduler
+resource "aws_scheduler_schedule" "cost_notification_schedule" {
+  name        = "aws-cost-notification-schedule-${var.environment}"
+  group_name  = aws_scheduler_schedule_group.cost_notification_group.name
+  description = "AWS料金通知Lambda関数を毎日実行（JST）"
+
+  flexible_time_window {
+    mode = "OFF"
+  }
+
+  schedule_expression          = var.schedule_expression
+  schedule_expression_timezone = "Asia/Tokyo"
+  state                        = "ENABLED"
+
+  target {
+    arn      = aws_lambda_function.cost_notifier.arn
+    role_arn = aws_iam_role.eventbridge_scheduler_role.arn
+
+    input = jsonencode({
+      detail = {
+        webhookUrl       = var.webhook_url
+        webhookUsername  = var.webhook_username
+        webhookAvatarUrl = var.webhook_avatar_url
+        costPeriodDays   = var.cost_period_days
+      }
+    })
+  }
+}
+
+# EventBridge Scheduler用IAMロール
+resource "aws_iam_role" "eventbridge_scheduler_role" {
+  name = "eventbridge-scheduler-role-${var.environment}"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "scheduler.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# EventBridge SchedulerからLambda関数を実行するためのポリシー
+resource "aws_iam_role_policy" "eventbridge_scheduler_lambda_invoke" {
+  name = "eventbridge-scheduler-lambda-invoke-${var.environment}"
+  role = aws_iam_role.eventbridge_scheduler_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "lambda:InvokeFunction"
+        Resource = aws_lambda_function.cost_notifier.arn
+      }
+    ]
+  })
+}
+
+# CloudWatch Logsグループ（ログ保持期間を短く設定してコスト削減）
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  name              = "/aws/lambda/${aws_lambda_function.cost_notifier.function_name}"
+  retention_in_days = 3
+
+  tags = {
+    Name = "aws-cost-notifier-lambda-logs"
+  }
 }

@@ -31,6 +31,10 @@ env.bak/
 venv.bak/
 .virtualenv/
 
+# uv Python package manager
+.venv/
+uv.lock
+
 # IDE
 .vscode/
 .idea/
@@ -51,7 +55,6 @@ Thumbs.db
 *.tfstate
 *.tfstate.*
 .terraform/
-.terraform.lock.hcl
 terraform.tfvars
 terraform.tfplan
 *.tfplan
@@ -74,9 +77,8 @@ logs/
 # Lambda packaging
 lambda_function.zip
 *.zip
-
-# Generated diagrams (optional - コメントアウトして追跡する場合)
-# generated-diagrams/
+lambda_package/
+lambda_package.zip
 
 # Secrets and sensitive files
 secrets.json

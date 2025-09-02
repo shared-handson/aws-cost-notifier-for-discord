@@ -1,0 +1,31 @@
+name: 'Check No Terraform File'
+description: 'Check if no_terraform file exists (case insensitive, any extension)'
+
+outputs:
+  no-terraform-found:
+    description: 'Whether no_terraform file was found'
+    value: ${{ steps.check.outputs.no-terraform-found }}
+  no-terraform-file:
+    description: 'The actual no_terraform file found'
+    value: ${{ steps.check.outputs.no-terraform-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check for no_terraform file
+      id: check
+      shell: bash
+      run: |
+        # no_terraformファイルをチェック（大文字小文字問わず、拡張子任意）
+        NO_TERRAFORM_FILE=""
+        NO_TERRAFORM_FOUND="false"
+        
+        # プロジェクトルートでno_terraformで始まるファイルを検索（大文字小文字問わず）
+        if [ -n "$(find . -maxdepth 1 -iname "no_terraform*" -type f)" ]; then
+          NO_TERRAFORM_FILE=$(find . -maxdepth 1 -iname "no_terraform*" -type f | head -1)
+          NO_TERRAFORM_FOUND="true"
+          echo "Found no_terraform file: $NO_TERRAFORM_FILE"
+        fi
+        
+        echo "no-terraform-found=$NO_TERRAFORM_FOUND" >> $GITHUB_OUTPUT
+        echo "no-terraform-file=$NO_TERRAFORM_FILE" >> $GITHUB_OUTPUT

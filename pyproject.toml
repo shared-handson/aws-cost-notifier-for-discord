@@ -1,0 +1,34 @@
+# ===================================================================
+# pyproject.toml - Python プロジェクト設定ファイル
+# ===================================================================
+# このファイルは uv パッケージマネージャーによって管理される
+# Python プロジェクトの設定を定義する PEP 518 準拠の設定ファイルです
+# 
+# uv とは：
+# - Rust で書かれた高速な Python パッケージマネージャー
+# - pip, pip-tools, virtualenv の代替
+# - pyproject.toml を読み取り、依存関係を自動解決・インストール
+# ===================================================================
+
+# プロジェクトのメタデータ定義
+# uv がこの情報を使ってプロジェクトを識別・管理
+[project]
+name = "aws-cost-notifier-for-discord"
+version = "1.0.0"
+description = "AWS料金をDiscordに定期通知するサーバレスアプリケーション"
+authors = [
+    { name = "amu1017", email = "amu1017@example.com" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+
+# 本番環境（Lambda）で実際に必要な依存関係のみ
+# uv install 実行時に自動的にインストールされる
+dependencies = [
+    "boto3>=1.34.0",
+    "discord.py>=2.4.0"
+]
+
+# パッケージ検索設定 - lambdaディレクトリのみを対象とする
+[tool.setuptools.packages.find]
+where = ["lambda"]

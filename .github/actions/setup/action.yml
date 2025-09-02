@@ -61,6 +61,7 @@ runs:
     # Terraformの初期化
     - name: Terraform Init
       shell: bash
+      working-directory: terraform
       run: |
         terraform init \
           -backend-config="bucket=${{ inputs.aws-tf-state-bucket }}" \
@@ -71,4 +72,5 @@ runs:
     # Terraformのフォーマットチェック
     - name: Terraform Format
       shell: bash
+      working-directory: terraform
       run: terraform fmt -check

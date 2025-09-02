@@ -38,6 +38,7 @@ jobs:
 
       # Terraformで作ったリソースの破棄の実行
       - name: Terraform Destroy Exec
+        working-directory: terraform
         run: terraform destroy -auto-approve -input=false
 
       # Discord通知をComposite Actionで実行

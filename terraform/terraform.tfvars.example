@@ -1,7 +1,11 @@
-# Example Terraform variables file
-# Copy this file to terraform.tfvars and update with your values
+# Terraform変数サンプルファイル
+# このファイルをterraform.tfvarsにコピーして、実際の値に変更してください
 
-aws_region          = "us-east-1"
+aws_region          = "ap-northeast-1"
 environment         = "dev"
-discord_webhook_url = "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
-schedule_expression = "cron(0 9 * * ? *)"  # Daily at 9:00 AM UTC
+schedule_expression = "cron(0 9 * * ? *)"  # 毎日 JST 9:00 AM
+log_level           = "ERROR"
+webhook_url         = "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+webhook_username    = "AWS Notifier"
+webhook_avatar_url  = "https://shared-handson.github.io/icons-factory/aws/Cloud-logo.png"
+cost_period_days    = 7

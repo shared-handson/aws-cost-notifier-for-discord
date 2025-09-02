@@ -27,9 +27,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # no_terraformファイルの存在チェック
+      - name: Check No Terraform File
+        id: check_no_terraform
+        uses: ./.github/actions/check-no-terraform
+
       # 共通処理をComposite Actionで実行
       - name: Setup Terraform Environment
         id: setup
+        if: steps.check_no_terraform.outputs.no-terraform-found == 'false'
         uses: ./.github/actions/setup
         with:
           aws-iam-role: ${{ secrets.AWS_IAM_ROLE }}
@@ -38,13 +44,23 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
           tf-version: ${{ env.TF_VERSION }}
 
-      # Terraformの適用
+      # no_terraformファイル存在時のスキップ通知
+      - name: Skip Terraform Apply
+        if: steps.check_no_terraform.outputs.no-terraform-found == 'true'
+        run: |
+          echo "⚠️ Terraform Apply がスキップされました"
+          echo "理由: ${{ steps.check_no_terraform.outputs.no-terraform-file }} ファイルが存在します"
+          echo "Apply を有効にするには、このファイルを削除してください。"
+
+      # Terraformの適用（no_terraformファイルが存在しない場合のみ）
       - name: Terraform Apply
+        if: steps.check_no_terraform.outputs.no-terraform-found == 'false'
+        working-directory: terraform
         run: terraform apply -auto-approve -input=false
 
-      # Discord通知をComposite Actionで実行
+      # Discord通知をComposite Actionで実行（no_terraformファイルが存在しない場合のみ）
       - name: Send Discord Notification
-        if: ${{ always() }}
+        if: ${{ always() && steps.check_no_terraform.outputs.no-terraform-found == 'false' }}
         uses: ./.github/actions/discord-notify
         with:
           webhook-url: ${{ secrets.DC_WEBHOOK_GHAC }}

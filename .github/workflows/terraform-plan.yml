@@ -30,6 +30,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # no_terraformファイルの存在チェック
+      - name: Check No Terraform File
+        id: check_no_terraform
+        uses: ./.github/actions/check-no-terraform
+
       # 共通処理をComposite Actionで実行
       - name: Setup Terraform Environment
         id: setup
@@ -45,6 +50,7 @@ jobs:
       - name: Check Backend
         id: check_backend
         continue-on-error: true
+        working-directory: terraform
         run: |
           aws s3api head-bucket --bucket ${{ secrets.AWS_TF_STATE_BUCKET }}
           if [ ! -f ".terraform/terraform.tfstate" ]; then exit 1; fi
@@ -70,6 +76,7 @@ jobs:
       - name: Terraform Plan for PR
         id: plan
         continue-on-error: true
+        working-directory: terraform
         run: |
           set +e
           OUTPUT=$(terraform plan -no-color -input=false 2>&1)
@@ -120,6 +127,21 @@ jobs:
           \`\`\`
 
           </details>
+          EOF
+          )
+          gh pr comment ${{ github.event.pull_request.number }} --body-file <(echo "${MSG}")
+
+      # (no_terraformファイル存在時) Apply無効化の警告コメント
+      - name: PR Comment on No Terraform Warning
+        if: steps.plan.outcome == 'success' && steps.check_no_terraform.outputs.no-terraform-found == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MSG=$(cat <<EOF
+          ⚠️ **Terraform Apply 無効化**
+          🚫 \`${{ steps.check_no_terraform.outputs.no-terraform-file }}\` ファイルが検出されました。
+          このPRがマージされても **Terraform apply は実行されません**。
+          Apply を有効にするには、このファイルを削除してください。
           EOF
           )
           gh pr comment ${{ github.event.pull_request.number }} --body-file <(echo "${MSG}")

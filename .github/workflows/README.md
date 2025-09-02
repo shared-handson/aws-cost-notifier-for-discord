@@ -6,7 +6,39 @@
 - .github/actions
 - .github/workflows
 
+## Terraform コードの配置場所
+
+Terraform のコード（.tf ファイル）は `terraform/` フォルダに配置する必要がある。  
+プロジェクトルートではなく、terraform フォルダ内でTerraformコマンドが実行される。
+
+```
+プロジェクトルート/
+├── .github/
+│   ├── actions/
+│   └── workflows/
+└── terraform/
+    ├── main.tf
+    ├── variables.tf
+    └── その他の.tfファイル
+```
+
 # 使い方
+
+## Terraform実行の無効化
+
+プロジェクトルートに `no_terraform` で始まるファイル名のファイル（大文字小文字問わず、拡張子任意）を配置すると、Terraformの実行を無効化できます。
+
+例:
+- `no_terraform`
+- `NO_TERRAFORM`
+- `No_Terraform.txt`
+- `no_terraform.md`
+
+この機能により：
+- **terraform-plan**: planは通常通り実行されますが、PRコメントに「applyしない」旨の警告が表示されます
+- **terraform-apply**: applyが完全にスキップされ、Discord通知も送信されません
+
+Terraformを再度有効にするには、該当ファイルを削除してください。
 
 ## terraform-plan
 

@@ -38,6 +38,7 @@ jobs:
 
       # Terraformで作ったリソースの破棄の確認
       - name: Terraform Destroy Plan
+        working-directory: terraform
         run: terraform plan -destroy -no-color -input=false
 
       # Discord通知をComposite Actionで実行
