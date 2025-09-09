@@ -20,7 +20,6 @@ output "scheduler_schedule_arn" {
   value       = aws_scheduler_schedule.cost_notification_schedule.arn
 }
 
-
 output "iam_role_arn" {
   description = "Lambda用IAMロールARN"
   value       = aws_iam_role.lambda_role.arn

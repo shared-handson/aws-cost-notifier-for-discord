@@ -8,6 +8,7 @@ import aiohttp
 import asyncio
 import re
 import os
+import math
 
 # ログ設定
 logger = logging.getLogger()
@@ -75,56 +76,132 @@ def get_cost(event: Dict[str, Any]) -> Dict[str, Any]:
         event: Lambda関数に渡されるEventBridgeイベントデータ
 
     Returns:
-        dict: コスト情報の辞書
-            - PeriodDays (int): コスト取得期間（日数）
-            - start_date (str): 取得開始日（YYYY-MM-DD形式）
-            - end_date (str): 取得終了日（YYYY-MM-DD形式）
-            - total_cost (float): 期間中の合計コスト（USD）
+        cost: コスト情報の辞書
+            - budget (float): 月次予算金額（USD）
+            - daily: 日次集計
+                - PeriodDays (int): コスト取得期間（日数）
+                - end (str): 取得期間の終了日（YYYY-MM-DD形式）
+                - start (str): 取得期間の開始日（YYYY-MM-DD形式）
+                - total (float): 合計コスト（USD）
+            - monthly_this: 当月の月次集計
+                - PeriodDays (int): コスト取得期間（日数）
+                - end (str): 取得期間の終了日（YYYY-MM-DD形式）
+                - start (str): 取得期間の開始日（YYYY-MM-DD形式）
+                - total (float): 当月の月次集計の合計コスト（USD）
+            - monthly_last: 先月の月次集計
+                - PeriodDays (int): コスト取得期間（日数）
+                - end (str): 取得期間の終了日（YYYY-MM-DD形式）
+                - start (str): 取得期間の開始日（YYYY-MM-DD形式）
+                - total (float): 当月の月次集計の合計コスト（USD）
+
 
     Raises:
-        ValueError: コスト取得期間が範囲外（1-90日）の場合
+        ValueError: コスト取得期間が範囲外（1-30日）の場合
         Exception: Cost Explorer APIの呼び出しに失敗した場合
     """
-    cost = {}
+    cost = {"budget": 0.0, "daily": {}, "monthly_this": {}, "monthly_last": {}}
 
     # コスト取得期間のチェック
     try:
-        # EventBridgeからの設定値を取得（デフォルト7日）
+        # EventBridgeからの設定値を取得（デフォルト$1）
         detail = (
             event.get("detail", {}) if isinstance(event.get("detail"), dict) else {}
         )
-        cost["PeriodDays"] = int(detail.get("costPeriodDays", 7))
-        # 妥当性チェック（1日〜90日の範囲）
-        if not (1 <= cost["PeriodDays"] <= 90):
+
+        cost["budget"] = float(detail.get("budget", 1))
+
+        # 妥当性チェック（$1〜9999の範囲）
+        if not (0 <= cost["budget"] <= 9999):
             raise ValueError(
-                f"costPeriodDays must be set in the range of 1-90: {cost['PeriodDays']}"
+                f"budget must be set in the range of 0-9999: {cost['budget']}"
+            )
+    except (ValueError, TypeError) as e:
+        raise ValueError(f"Invalid value for budget: {cost['budget']}") from e
+
+    # 月次予算金額のチェック
+    try:
+        # EventBridgeからの設定値を取得（デフォルト1日）
+        detail = (
+            event.get("detail", {}) if isinstance(event.get("detail"), dict) else {}
+        )
+
+        cost["daily"]["PeriodDays"] = int(detail.get("cost_period_days", 1))
+
+        # 妥当性チェック（1日〜30日の範囲）
+        if not (1 <= cost["daily"]["PeriodDays"] <= 30):
+            raise ValueError(
+                f"cost_period_days must be set in the range of 1-30: {cost['daily']['PeriodDays']}"
             )
     except (ValueError, TypeError) as e:
         raise ValueError(
-            f"Invalid value for costPeriodDays: {cost['PeriodDays']}"
+            f"Invalid value for cost_period_days: {cost['daily']['PeriodDays']}"
         ) from e
 
-    # 日付計算
+    # 日次計算で使う日付
     today = date.today()
-    start_period_ago = today - timedelta(days=cost["PeriodDays"])
-    cost["start_date"] = start_period_ago.strftime("%Y-%m-%d")
-    cost["end_date"] = today.strftime("%Y-%m-%d")
+    cost["daily"]["end"] = today.strftime("%Y-%m-%d")
+    day_start = today - timedelta(days=cost["daily"]["PeriodDays"])
+    cost["daily"]["start"] = day_start.strftime("%Y-%m-%d")
+
+    # 当月の月次計算で使う日付
+    cost["monthly_this"]["PeriodDays"] = (today - today.replace(day=1)).days + 1
+    cost["monthly_this"]["end"] = today.strftime("%Y-%m-%d")
+    cost["monthly_this"]["start"] = today.replace(day=1).strftime("%Y-%m-%d")
+
+    # 先月の月次計算で使う日付（日次取得が月跨ぎの時）
+    last_end = today.replace(day=1) - timedelta(days=1)
+    last_start = last_end.replace(day=1)
+    if cost["daily"]["start"] < cost["monthly_this"]["start"]:
+        cost["monthly_last"]["PeriodDays"] = (last_end - last_start).days + 1
+        cost["monthly_last"]["end"] = last_end.strftime("%Y-%m-%d")
+        cost["monthly_last"]["start"] = last_start.strftime("%Y-%m-%d")
 
     try:
         # Cost ExplorerはUS East 1固定（AWSの仕様）
         client = boto3.client("ce", region_name="us-east-1")
 
-        response = client.get_cost_and_usage(
-            TimePeriod={"Start": cost["start_date"], "End": cost["end_date"]},
+        # boto3で日次コストを取得
+        daily_cost = client.get_cost_and_usage(
+            TimePeriod={"Start": cost["daily"]["start"], "End": cost["daily"]["end"]},
             Granularity="DAILY",
             Metrics=["UnblendedCost"],
         )
 
-        # 複数日間の合計コストを計算
-        cost["total_cost"] = 0
-        for result in response["ResultsByTime"]:
+        cost["daily"]["total"] = 0
+        for result in daily_cost["ResultsByTime"]:
             amount = float(result["Total"]["UnblendedCost"]["Amount"])
-            cost["total_cost"] += amount
+            cost["daily"]["total"] += amount
+
+        # boto3で当月の月次コストを取得
+        monthly_this_cost = client.get_cost_and_usage(
+            TimePeriod={
+                "Start": cost["monthly_this"]["start"],
+                "End": cost["monthly_this"]["end"],
+            },
+            Granularity="MONTHLY",
+            Metrics=["UnblendedCost"],
+        )
+
+        cost["monthly_this"]["total"] = float(
+            monthly_this_cost["ResultsByTime"][0]["Total"]["UnblendedCost"]["Amount"]
+        )
+
+        # boto3で先月の月次コストを取得（日次取得が月跨ぎの時）
+        if cost["monthly_last"] != {}:
+            monthly_last_cost = client.get_cost_and_usage(
+                TimePeriod={
+                    "Start": cost["monthly_last"]["start"],
+                    "End": cost["monthly_last"]["end"],
+                },
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+            )
+
+            cost["monthly_last"]["total"] = float(
+                monthly_last_cost["ResultsByTime"][0]["Total"]["UnblendedCost"][
+                    "Amount"
+                ]
+            )
 
         return cost
 
@@ -139,28 +216,62 @@ def create_cost_embed(cost: Dict[str, Any]) -> Embed:
 
     Args:
         cost: コスト情報の辞書
-            - PeriodDays (int): コスト取得期間（日数）
-            - start_date (str): 取得開始日（YYYY-MM-DD形式）
-            - end_date (str): 取得終了日（YYYY-MM-DD形式）
-            - total_cost (float): 期間中の合計コスト（USD）
+            - budget (float): 月次予算金額（USD）
+            - daily: 日次集計
+                - PeriodDays (int): コスト取得期間（日数）
+                - end (str): 取得期間の終了日（YYYY-MM-DD形式）
+                - start (str): 取得期間の開始日（YYYY-MM-DD形式）
+                - total (float): 合計コスト（USD）
+            - monthly_this: 当月の月次集計
+                - PeriodDays (int): コスト取得期間（日数）
+                - end (str): 取得期間の終了日（YYYY-MM-DD形式）
+                - start (str): 取得期間の開始日（YYYY-MM-DD形式）
+                - total (float): 当月の月次集計の合計コスト（USD）
+            - monthly_last: 先月の月次集計
+                - PeriodDays (int): コスト取得期間（日数）
+                - end (str): 取得期間の終了日（YYYY-MM-DD形式）
+                - start (str): 取得期間の開始日（YYYY-MM-DD形式）
+                - total (float): 当月の月次集計の合計コスト（USD）
 
     Returns:
         discord.Embed: コスト通知用のEmbedオブジェクト
     """
     # 期間とメッセージテキストを作成
-    period_text = f"過去{cost['PeriodDays']}日間" if cost["PeriodDays"] != 1 else "昨日"
-    main_text = f"**{cost['start_date'].replace('-', '年', 1).replace('-', '月')}日** から **{cost['end_date'].replace('-', '年', 1).replace('-', '月')}日** までの{period_text}のAWS利用料金をお知らせします 📊"
+    main_text = f"**{cost['daily']['start'][5:].replace('-', '月')}日** から **{cost['daily']['end'][5:].replace('-', '月')}日** までのAWS利用料金をお知らせします 📊"
 
     # discord.pyのEmbedオブジェクトを作成
     embed = Embed(
         title="AWS料金通知 💰", description=main_text, color=0xFF9900  # オレンジ色
     )
 
-    # フィールド追加
+    # 日次コストのフィールド追加
     embed.add_field(
-        name="💸 合計金額", value=f"${cost['total_cost']:.2f} USD", inline=True
+        name="💸 料金$", value=f"$ {cost['daily']['total']:.2f}", inline=True
     )
-    embed.add_field(name="📅 期間", value=period_text, inline=True)
+    embed.add_field(
+        name="📅 期間days", value=f"{cost['daily']['PeriodDays']} days", inline=True
+    )
+
+    # 当月の月次コストのフィールド追加
+    monthly_this_rate = f"{math.ceil(cost['monthly_this']['total']) / math.ceil(cost['budget']) * 100:.1f}%"
+    monthly_this_value = (
+        f"$ {math.ceil(cost['monthly_this']['total'])} / $ {math.ceil(cost['budget'])}"
+    )
+    embed.add_field(
+        name="💹当月料金$/予算$＝消化率% ($切り上げ)",
+        value=f"{monthly_this_value} = {monthly_this_rate}",
+        inline=False,
+    )
+
+    # 先月の月次コストのフィールド追加（日次取得が月跨ぎの時）
+    if cost["monthly_last"] != {}:
+        monthly_last_rate = f"{math.ceil(cost['monthly_last']['total']) / math.ceil(cost['budget']) * 100:.1f}%"
+        monthly_last_value = f"$ {math.ceil(cost['monthly_last']['total'])} / $ {math.ceil(cost['budget'])}"
+        embed.add_field(
+            name="💹先月料金$/予算$＝消化率% ($切り上げ)",
+            value=f"{monthly_last_value} = {monthly_last_rate}",
+            inline=False,
+        )
 
     # フッター設定
     embed.set_footer(
@@ -237,7 +348,7 @@ def lambda_handler(event, context=None):
             - detail.webhookUrl (str): Discord Webhook URL
             - detail.webhookUsername (str, optional): Discordユーザー名
             - detail.webhookAvatarUrl (str, optional): Discordアバター画像URL
-            - detail.costPeriodDays (str, optional): コスト取得期間（デフォルト: 7日）
+            - detail.costday_PeriodDays (str, optional): コスト取得期間（デフォルト: 7日）
         context: Lambda実行コンテキスト
 
     Returns:
@@ -300,7 +411,8 @@ if __name__ == "__main__":
             "webhookUrl": "https://discord.com/api/webhooks/test",
             "webhookUsername": "テスト用AWS料金通知ボット",
             "webhookAvatarUrl": "https://shared-handson.github.io/icons-factory/aws/Savings-Plans.png",
-            "costPeriodDays": 1,
+            "costday_PeriodDays": 10,
+            "budget": 120,
         },
     }
 
@@ -323,7 +435,7 @@ if __name__ == "__main__":
     # Lambda関数を実行
     print("=== EventBridge形式でのLambda関数テスト実行 ===")
     print(
-        f"イベント設定: costPeriodDays={test_event['detail']['costPeriodDays']}, webhookUsername={test_event['detail']['webhookUsername']}"
+        f"イベント設定: webhookUsername={test_event['detail']['webhookUsername']}, costday_PeriodDays={test_event['detail']['costday_PeriodDays']}, budget={test_event['detail']['budget']}"
     )
 
     result = lambda_handler(test_event, test_context)

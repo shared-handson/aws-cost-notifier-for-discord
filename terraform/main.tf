@@ -1,7 +1,7 @@
 # AWS Cost Notifier for Discord - メインTerraform設定ファイル
 
 terraform {
-  backend "s3" {}
+  #backend "s3" {}
   required_version = ">= 1.12.2"
   required_providers {
     aws = {
@@ -36,7 +36,7 @@ data "aws_region" "current" {}
 # Lambda関数用IAMロール
 resource "aws_iam_role" "lambda_role" {
   name        = "aws-cost-notifier-lambda-role-${var.environment}"
-  description = "AWS Cost Notifier Lambda関数用IAMロール"
+  description = "AWS Cost Notifier Lambda Role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -87,8 +87,7 @@ resource "aws_lambda_function" "cost_notifier" {
   function_name = "aws-cost-notifier-${var.environment}"
   description   = "Discord用AWS料金通知Lambda関数"
 
-  filename         = "lambda_function.zip"
-  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+  filename = "${path.module}/lambda_package.zip"
 
   package_type  = "Zip"
   handler       = "lambda_function.lambda_handler"
@@ -136,7 +135,8 @@ resource "null_resource" "lambda_dependencies" {
       cp ${path.module}/../lambda/lambda_function.py ${path.module}/lambda_package/
 
       # ZIP化（依存関係含む）
-      zip -r ${path.module}/lambda_package.zip ${path.module}/lambda_package/
+      cd ${path.module}/lambda_package
+      zip -r ../lambda_package.zip ./*
     EOT
   }
 }
@@ -174,6 +174,7 @@ resource "aws_scheduler_schedule" "cost_notification_schedule" {
         webhookUsername  = var.webhook_username
         webhookAvatarUrl = var.webhook_avatar_url
         costPeriodDays   = var.cost_period_days
+        budget           = var.budget
       }
     })
   }

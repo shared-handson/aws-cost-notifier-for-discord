@@ -61,12 +61,23 @@ variable "webhook_avatar_url" {
 }
 
 variable "cost_period_days" {
-  description = "コスト取得期間の日数（1-90日、省略時は7日）"
+  description = "コスト取得期間の日数（1-30日、省略時は1日）"
   type        = number
-  default     = 7
+  default     = 1
 
   validation {
-    condition     = var.cost_period_days == null || (var.cost_period_days >= 1 && var.cost_period_days <= 90)
-    error_message = "コスト取得期間は1日から90日の範囲で指定してください。"
+    condition     = var.cost_period_days == null || (var.cost_period_days >= 1 && var.cost_period_days <= 30)
+    error_message = "コスト取得期間は1日から30日の範囲で指定してください。"
+  }
+}
+
+variable "budget" {
+  description = "月次のUSD予算額（$1-9999、省略時は$1）"
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.budget == null || (var.budget >= 1 && var.budget <= 9999)
+    error_message = "月次のUSD予算額は$1から$9999の範囲で指定してください。"
   }
 }

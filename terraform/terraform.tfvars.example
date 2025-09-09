@@ -9,3 +9,4 @@ webhook_url         = "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEB
 webhook_username    = "AWS Notifier"
 webhook_avatar_url  = "https://shared-handson.github.io/icons-factory/aws/Cloud-logo.png"
 cost_period_days    = 7
+budget              = 10
