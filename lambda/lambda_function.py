@@ -94,7 +94,6 @@ def get_cost(event: Dict[str, Any]) -> Dict[str, Any]:
                 - start (str): 取得期間の開始日（YYYY-MM-DD形式）
                 - total (float): 当月の月次集計の合計コスト（USD）
 
-
     Raises:
         ValueError: コスト取得期間が範囲外（1-30日）の場合
         Exception: Cost Explorer APIの呼び出しに失敗した場合
@@ -348,7 +347,7 @@ def lambda_handler(event, context=None):
             - detail.webhookUrl (str): Discord Webhook URL
             - detail.webhookUsername (str, optional): Discordユーザー名
             - detail.webhookAvatarUrl (str, optional): Discordアバター画像URL
-            - detail.costday_PeriodDays (str, optional): コスト取得期間（デフォルト: 7日）
+            - detail.costday_PeriodDays (str, optional): コスト取得期間（デフォルト: 1日）
         context: Lambda実行コンテキスト
 
     Returns:
@@ -408,10 +407,10 @@ if __name__ == "__main__":
         ],
         # カスタム設定値をdetailセクションに含める
         "detail": {
-            "webhookUrl": "https://discord.com/api/webhooks/test",
+            "webhookUrl": "https://discord.com/api/webhooks/1234567890123456789/abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890123456",
             "webhookUsername": "テスト用AWS料金通知ボット",
             "webhookAvatarUrl": "https://shared-handson.github.io/icons-factory/aws/Savings-Plans.png",
-            "costday_PeriodDays": 10,
+            "cost_period_days": 1,
             "budget": 120,
         },
     }
@@ -435,7 +434,7 @@ if __name__ == "__main__":
     # Lambda関数を実行
     print("=== EventBridge形式でのLambda関数テスト実行 ===")
     print(
-        f"イベント設定: webhookUsername={test_event['detail']['webhookUsername']}, costday_PeriodDays={test_event['detail']['costday_PeriodDays']}, budget={test_event['detail']['budget']}"
+        f"イベント設定: webhookUsername={test_event['detail']['webhookUsername']}, costday_PeriodDays={test_event['detail']['cost_period_days']}, budget={test_event['detail']['budget']}"
     )
 
     result = lambda_handler(test_event, test_context)
